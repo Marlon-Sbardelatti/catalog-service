@@ -109,3 +109,17 @@ func (r *mongoRepository) Update(
 
 	return &previous, nil
 }
+
+func (r *mongoRepository) Exists(ctx context.Context, id bson.ObjectID) (bool, error) {
+	err := r.collection.FindOne(
+		ctx,
+		bson.M{"_id": id},
+		options.FindOne().SetProjection(bson.M{"_id": 1}),
+	).Err()
+
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return false, nil
+	}
+
+	return err == nil, err
+}

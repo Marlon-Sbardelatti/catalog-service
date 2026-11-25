@@ -16,6 +16,10 @@ Content-Disposition: form-data; name="name"
 
 Camisa Furia adidas 2026
 --WebAppBoundary
+Content-Disposition: form-data; name="category_id"
+
+6afb5bcd3713b5dac39cfee9
+--WebAppBoundary
 Content-Disposition: form-data; name="description"
 
 Camisa (jersey) Furia E-Sports 2026 - Fallen, preta com detalhes brancos
@@ -38,6 +42,10 @@ Content-Type: multipart/form-data; boundary=WebAppBoundary
 Content-Disposition: form-data; name="name"
 
 Camisa Vasco nike 2026 - Home
+--WebAppBoundary
+Content-Disposition: form-data; name="category_id"
+
+6afb5bcd3713b5dac39cfee9
 --WebAppBoundary
 Content-Disposition: form-data; name="description"
 

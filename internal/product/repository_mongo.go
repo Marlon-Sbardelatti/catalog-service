@@ -109,3 +109,7 @@ func (r *mongoRepository) Delete(ctx context.Context, id bson.ObjectID) error {
 	}
 	return nil
 }
+
+func (r *mongoRepository) CountByCategory(ctx context.Context, categoryID bson.ObjectID) (int64, error) {
+	return r.collection.CountDocuments(ctx, bson.M{"category_id": categoryID})
+}

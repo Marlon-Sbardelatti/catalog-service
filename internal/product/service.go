@@ -20,24 +20,32 @@ type FileStorage interface {
 	PublicURL(key string) string
 }
 
+type CategoryChecker interface {
+	Exists(ctx context.Context, id bson.ObjectID) (bool, error)
+}
+
 type ProductService struct {
 	repository Repository
 	storage    FileStorage
+	categories CategoryChecker
 }
 
-func NewProductService(repository Repository, storage FileStorage) *ProductService {
+func NewProductService(repository Repository, storage FileStorage, categories CategoryChecker) *ProductService {
 	return &ProductService{
 		repository: repository,
 		storage:    storage,
+		categories: categories,
 	}
 }
 
 func (s *ProductService) Create(
 	ctx context.Context,
 	req CreateProductRequest,
+	categoryID bson.ObjectID,
 	file *multipart.FileHeader,
 ) (*Product, error) {
 	product := &Product{
+		CategoryID:  categoryID,
 		Name:        strings.TrimSpace(req.Name),
 		Description: req.Description,
 		Price:       req.Price,
@@ -47,6 +55,10 @@ func (s *ProductService) Create(
 
 	if product.Name == "" || product.Price <= 0 {
 		return nil, ErrInvalidProduct
+	}
+
+	if err := s.ensureCategoryExists(ctx, categoryID); err != nil {
+		return nil, err
 	}
 
 	contentType, src, err := utils.ReadImage(file)
@@ -62,6 +74,9 @@ func (s *ProductService) Create(
 	}
 
 	if err := s.repository.Create(ctx, product); err != nil {
+		if deleteErr := s.storage.Delete(ctx, product.ImageKey); deleteErr != nil {
+			slog.Error("deleting unused product image", "key", product.ImageKey, "error", deleteErr)
+		}
 		return nil, err
 	}
 
@@ -99,6 +114,7 @@ func (s *ProductService) Delete(ctx context.Context, id bson.ObjectID) error {
 func (s *ProductService) Update(ctx context.Context,
 	id bson.ObjectID,
 	req UpdateProductRequest,
+	categoryID bson.ObjectID,
 	file *multipart.FileHeader,
 ) (*Product, error) {
 	set := bson.M{}
@@ -125,6 +141,13 @@ func (s *ProductService) Update(ctx context.Context,
 	if req.Price > 0 {
 		price = req.Price
 		set["price"] = price
+	}
+
+	if !categoryID.IsZero() {
+		if err := s.ensureCategoryExists(ctx, categoryID); err != nil {
+			return nil, err
+		}
+		set["category_id"] = categoryID
 	}
 
 	if len(set) == 0 && file == nil {
@@ -179,6 +202,9 @@ func (s *ProductService) Update(ctx context.Context,
 	if price > 0 {
 		product.Price = price
 	}
+	if !categoryID.IsZero() {
+		product.CategoryID = categoryID
+	}
 	if newKey != "" {
 		product.ImageKey = newKey
 	}
@@ -186,4 +212,17 @@ func (s *ProductService) Update(ctx context.Context,
 	product.ImageURL = s.storage.PublicURL(product.ImageKey)
 
 	return &product, nil
+}
+
+func (s *ProductService) ensureCategoryExists(ctx context.Context, id bson.ObjectID) error {
+	exists, err := s.categories.Exists(ctx, id)
+	if err != nil {
+		return fmt.Errorf("checking category: %w", err)
+	}
+
+	if !exists {
+		return ErrCategoryNotFound
+	}
+
+	return nil
 }

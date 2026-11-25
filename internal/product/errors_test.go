@@ -27,6 +27,12 @@ func TestToAPIError(t *testing.T) {
 			code:       "PRODUCT_NOT_FOUND",
 		},
 		{
+			name:       "category not found",
+			err:        ErrCategoryNotFound,
+			statusCode: http.StatusUnprocessableEntity,
+			code:       "PRODUCT_CATEGORY_NOT_FOUND",
+		},
+		{
 			name:       "already exists",
 			err:        ErrProductAlreadyExists,
 			statusCode: http.StatusConflict,

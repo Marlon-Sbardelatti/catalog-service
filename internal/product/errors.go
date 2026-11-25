@@ -9,12 +9,15 @@ var (
 	ErrInvalidProduct       = errors.New("invalid product data")
 	ErrProductNotFound      = errors.New("product not found")
 	ErrProductAlreadyExists = errors.New("product already exists")
+	ErrCategoryNotFound     = errors.New("category not found")
 )
 
 func toAPIError(err error) apierrors.APIError {
 	switch {
 	case errors.Is(err, ErrInvalidProduct):
 		return apierrors.UnprocessableEntity("PRODUCT_INVALID", "invalid product data")
+	case errors.Is(err, ErrCategoryNotFound):
+		return apierrors.UnprocessableEntity("PRODUCT_CATEGORY_NOT_FOUND", "category not found")
 	case errors.Is(err, ErrProductNotFound):
 		return apierrors.NotFound("PRODUCT_NOT_FOUND", "product not found")
 	case errors.Is(err, ErrProductAlreadyExists):

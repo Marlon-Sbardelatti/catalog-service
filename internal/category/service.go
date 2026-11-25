@@ -9,13 +9,19 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-type CategoryService struct {
-	repository Repository
+type ProductCounter interface {
+	CountByCategory(ctx context.Context, categoryID bson.ObjectID) (int64, error)
 }
 
-func NewCategoryService(repository Repository) *CategoryService {
+type CategoryService struct {
+	repository Repository
+	products   ProductCounter
+}
+
+func NewCategoryService(repository Repository, products ProductCounter) *CategoryService {
 	return &CategoryService{
 		repository: repository,
+		products:   products,
 	}
 }
 
@@ -56,6 +62,15 @@ func (s *CategoryService) FindByID(ctx context.Context, id bson.ObjectID) (*Cate
 }
 
 func (s *CategoryService) Delete(ctx context.Context, id bson.ObjectID) error {
+	count, err := s.products.CountByCategory(ctx, id)
+	if err != nil {
+		return fmt.Errorf("counting products: %w", err)
+	}
+
+	if count > 0 {
+		return ErrCategoryInUse
+	}
+
 	return s.repository.Delete(ctx, id)
 }
 

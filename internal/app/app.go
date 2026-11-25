@@ -35,13 +35,16 @@ func New(cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("creating storage client: %w", err)
 	}
 
+	categoryRepository := category.NewMongoRepository(db.Database)
+	productRepository := product.NewMongoRepository(db.Database)
+
 	return &App{
 		Router: server.NewRouter(
 			product.NewHandler(
-				product.NewProductService(product.NewMongoRepository(db.Database), storage),
+				product.NewProductService(productRepository, storage, categoryRepository),
 			),
 			category.NewCategoryHandler(
-				category.NewCategoryService(category.NewMongoRepository(db.Database)),
+				category.NewCategoryService(categoryRepository, productRepository),
 			),
 		),
 		cleanup: func() error {

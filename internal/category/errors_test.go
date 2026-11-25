@@ -33,6 +33,12 @@ func TestToAPIError(t *testing.T) {
 			code:       "CATEGORY_ALREADY_EXISTS",
 		},
 		{
+			name:       "category in use",
+			err:        ErrCategoryInUse,
+			statusCode: http.StatusConflict,
+			code:       "CATEGORY_IN_USE",
+		},
+		{
 			name:       "unexpected",
 			err:        errors.New("mongo is down"),
 			statusCode: http.StatusInternalServerError,

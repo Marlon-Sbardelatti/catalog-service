@@ -12,4 +12,5 @@ type Repository interface {
 	FindAll(ctx context.Context) ([]Category, error)
 	Update(ctx context.Context, id bson.ObjectID, set bson.M) (*Category, error)
 	Delete(ctx context.Context, id bson.ObjectID) error
+	Exists(ctx context.Context, id bson.ObjectID) (bool, error)
 }

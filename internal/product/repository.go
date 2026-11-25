@@ -12,4 +12,5 @@ type Repository interface {
 	FindAll(ctx context.Context) ([]Product, error)
 	Update(ctx context.Context, id bson.ObjectID, set bson.M) (*Product, error)
 	Delete(ctx context.Context, id bson.ObjectID) error
+	CountByCategory(ctx context.Context, categoryID bson.ObjectID) (int64, error)
 }

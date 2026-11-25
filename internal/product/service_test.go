@@ -23,8 +23,11 @@ type fakeRepository struct {
 }
 
 func (f *fakeRepository) Create(_ context.Context, p *Product) error {
+	if f.err != nil {
+		return f.err
+	}
 	f.created = p
-	return f.err
+	return nil
 }
 func (f *fakeRepository) FindByID(context.Context, bson.ObjectID) (*Product, error) {
 	if f.err != nil {
@@ -45,6 +48,18 @@ func (f *fakeRepository) Update(_ context.Context, _ bson.ObjectID, set bson.M) 
 }
 func (f *fakeRepository) Delete(context.Context, bson.ObjectID) error {
 	return f.err
+}
+func (f *fakeRepository) CountByCategory(context.Context, bson.ObjectID) (int64, error) {
+	return 0, f.err
+}
+
+type fakeCategoryChecker struct {
+	exists bool
+	err    error
+}
+
+func (f *fakeCategoryChecker) Exists(context.Context, bson.ObjectID) (bool, error) {
+	return f.exists, f.err
 }
 
 type fakeStorage struct {
@@ -102,20 +117,25 @@ func TestCreate(t *testing.T) {
 	validReq := CreateProductRequest{Name: "Camisa", Price: 299}
 
 	tests := []struct {
-		name          string
-		req           CreateProductRequest
-		contentType   string
-		uploadErr     error
-		wantErr       error
-		wantUploads   int
-		wantPersisted bool
+		name           string
+		req            CreateProductRequest
+		contentType    string
+		uploadErr      error
+		repositoryErr  error
+		categoryExists bool
+		categoryErr    error
+		wantErr        error
+		wantUploads    int
+		wantDeletes    int
+		wantPersisted  bool
 	}{
 		{
-			name:          "creates product and uploads image",
-			req:           validReq,
-			contentType:   "image/png",
-			wantUploads:   1,
-			wantPersisted: true,
+			name:           "creates product and uploads image",
+			req:            validReq,
+			contentType:    "image/png",
+			categoryExists: true,
+			wantUploads:    1,
+			wantPersisted:  true,
 		},
 		{
 			name:        "rejects invalid product before uploading",
@@ -125,32 +145,62 @@ func TestCreate(t *testing.T) {
 			wantUploads: 0,
 		},
 		{
-			name:        "rejects non-image upload",
-			req:         validReq,
-			contentType: "application/pdf",
-			wantErr:     ErrInvalidProduct,
-			wantUploads: 0,
+			name:           "rejects non-image upload",
+			req:            validReq,
+			contentType:    "application/pdf",
+			categoryExists: true,
+			wantErr:        ErrInvalidProduct,
+			wantUploads:    0,
 		},
 		{
-			name:          "does not persist when upload fails",
-			req:           validReq,
-			contentType:   "image/png",
-			uploadErr:     errors.New("s3 down"),
-			wantUploads:   1,
-			wantPersisted: false,
+			name:           "rejects unknown category before uploading",
+			req:            validReq,
+			contentType:    "image/png",
+			categoryExists: false,
+			wantErr:        ErrCategoryNotFound,
+			wantUploads:    0,
+		},
+		{
+			name:           "does not persist when upload fails",
+			req:            validReq,
+			contentType:    "image/png",
+			categoryExists: true,
+			uploadErr:      errors.New("s3 down"),
+			wantUploads:    1,
+			wantPersisted:  false,
+		},
+		{
+			name:           "deletes the uploaded image when insert fails",
+			req:            validReq,
+			contentType:    "image/png",
+			categoryExists: true,
+			repositoryErr:  errors.New("mongo is down"),
+			wantUploads:    1,
+			wantDeletes:    1,
+			wantPersisted:  false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repository := &fakeRepository{}
+			repository := &fakeRepository{err: tt.repositoryErr}
 			storage := &fakeStorage{err: tt.uploadErr}
-			service := NewProductService(repository, storage)
+			service := NewProductService(repository, storage, &fakeCategoryChecker{
+				exists: tt.categoryExists,
+				err:    tt.categoryErr,
+			})
+			categoryID := bson.NewObjectID()
 
-			product, err := service.Create(context.Background(), tt.req, imageFile(t, tt.contentType))
+			product, err := service.Create(context.Background(), tt.req, categoryID, imageFile(t, tt.contentType))
 
 			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
 				t.Fatalf("Create() error = %v, want %v", err, tt.wantErr)
+			}
+			if tt.categoryErr != nil && !errors.Is(err, tt.categoryErr) {
+				t.Fatalf("Create() error = %v, want %v", err, tt.categoryErr)
+			}
+			if tt.repositoryErr != nil && !errors.Is(err, tt.repositoryErr) {
+				t.Fatalf("Create() error = %v, want %v", err, tt.repositoryErr)
 			}
 			if tt.uploadErr != nil && err == nil {
 				t.Fatal("Create() error = nil, want upload error")
@@ -158,11 +208,17 @@ func TestCreate(t *testing.T) {
 			if storage.uploads != tt.wantUploads {
 				t.Errorf("uploads = %d, want %d", storage.uploads, tt.wantUploads)
 			}
+			if len(storage.deletes) != tt.wantDeletes {
+				t.Errorf("deletes = %v, want %d", storage.deletes, tt.wantDeletes)
+			}
 			if (repository.created != nil) != tt.wantPersisted {
 				t.Errorf("persisted = %v, want %v", repository.created != nil, tt.wantPersisted)
 			}
 
 			if tt.wantPersisted {
+				if product.CategoryID != categoryID {
+					t.Errorf("CategoryID = %s, want %s", product.CategoryID, categoryID)
+				}
 				if !strings.HasPrefix(product.ImageKey, "products/") {
 					t.Errorf("ImageKey = %q, want products/ prefix", product.ImageKey)
 				}
@@ -176,7 +232,7 @@ func TestCreate(t *testing.T) {
 
 func TestFindAllSetsImageURL(t *testing.T) {
 	repository := &fakeRepository{all: []Product{{ImageKey: "products/a"}}}
-	service := NewProductService(repository, &fakeStorage{})
+	service := NewProductService(repository, &fakeStorage{}, &fakeCategoryChecker{exists: true})
 
 	products, err := service.FindAll(context.Background())
 	if err != nil {
@@ -193,10 +249,10 @@ func TestUpdate(t *testing.T) {
 		previous := &Product{ID: bson.NewObjectID(), Name: "Old", Price: 100, ImageKey: "products/old"}
 		repository := &fakeRepository{previous: previous}
 		storage := &fakeStorage{}
-		service := NewProductService(repository, storage)
+		service := NewProductService(repository, storage, &fakeCategoryChecker{exists: true})
 
 		product, err := service.Update(context.Background(), previous.ID,
-			UpdateProductRequest{Name: "  Camisa  ", Price: 299}, imageFile(t, "image/png"))
+			UpdateProductRequest{Name: "  Camisa  ", Price: 299}, bson.NewObjectID(), imageFile(t, "image/png"))
 		if err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
@@ -222,9 +278,9 @@ func TestUpdate(t *testing.T) {
 		previous := &Product{ID: bson.NewObjectID(), Name: "Old", Price: 100, ImageKey: "products/old"}
 		repository := &fakeRepository{previous: previous}
 		storage := &fakeStorage{}
-		service := NewProductService(repository, storage)
+		service := NewProductService(repository, storage, &fakeCategoryChecker{exists: true})
 
-		product, err := service.Update(context.Background(), previous.ID, UpdateProductRequest{Price: 150}, nil)
+		product, err := service.Update(context.Background(), previous.ID, UpdateProductRequest{Price: 150}, bson.ObjectID{}, nil)
 		if err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
@@ -240,12 +296,59 @@ func TestUpdate(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects blank name before uploading", func(t *testing.T) {
+	t.Run("moves the product to an existing category", func(t *testing.T) {
+		previous := &Product{ID: bson.NewObjectID(), Name: "Old", Price: 100, ImageKey: "products/old"}
+		repository := &fakeRepository{previous: previous}
+		service := NewProductService(repository, &fakeStorage{}, &fakeCategoryChecker{exists: true})
+		categoryID := bson.NewObjectID()
+
+		product, err := service.Update(context.Background(), previous.ID, UpdateProductRequest{}, categoryID, nil)
+		if err != nil {
+			t.Fatalf("Update() error = %v", err)
+		}
+
+		if product.CategoryID != categoryID {
+			t.Errorf("CategoryID = %s, want %s", product.CategoryID, categoryID)
+		}
+		if got, _ := repository.set["category_id"].(bson.ObjectID); got != categoryID {
+			t.Errorf("set[category_id] = %v, want %s", repository.set["category_id"], categoryID)
+		}
+	})
+
+	t.Run("rejects unknown category before uploading", func(t *testing.T) {
 		storage := &fakeStorage{}
-		service := NewProductService(&fakeRepository{}, storage)
+		service := NewProductService(&fakeRepository{}, storage, &fakeCategoryChecker{exists: false})
 
 		_, err := service.Update(context.Background(), bson.NewObjectID(),
-			UpdateProductRequest{Name: "   "}, imageFile(t, "image/png"))
+			UpdateProductRequest{Price: 10}, bson.NewObjectID(), imageFile(t, "image/png"))
+		if !errors.Is(err, ErrCategoryNotFound) {
+			t.Fatalf("Update() error = %v, want ErrCategoryNotFound", err)
+		}
+		if storage.uploads != 0 {
+			t.Errorf("uploads = %d, want 0", storage.uploads)
+		}
+		if len(storage.deletes) != 0 {
+			t.Errorf("deletes = %v, want none", storage.deletes)
+		}
+	})
+
+	t.Run("propagates category lookup failure", func(t *testing.T) {
+		boom := errors.New("mongo is down")
+		service := NewProductService(&fakeRepository{}, &fakeStorage{}, &fakeCategoryChecker{err: boom})
+
+		_, err := service.Update(context.Background(), bson.NewObjectID(),
+			UpdateProductRequest{Price: 10}, bson.NewObjectID(), nil)
+		if !errors.Is(err, boom) {
+			t.Fatalf("Update() error = %v, want %v", err, boom)
+		}
+	})
+
+	t.Run("rejects blank name before uploading", func(t *testing.T) {
+		storage := &fakeStorage{}
+		service := NewProductService(&fakeRepository{}, storage, &fakeCategoryChecker{exists: true})
+
+		_, err := service.Update(context.Background(), bson.NewObjectID(),
+			UpdateProductRequest{Name: "   "}, bson.ObjectID{}, imageFile(t, "image/png"))
 		if !errors.Is(err, ErrInvalidProduct) {
 			t.Fatalf("Update() error = %v, want ErrInvalidProduct", err)
 		}
@@ -255,9 +358,9 @@ func TestUpdate(t *testing.T) {
 	})
 
 	t.Run("rejects an empty update", func(t *testing.T) {
-		service := NewProductService(&fakeRepository{}, &fakeStorage{})
+		service := NewProductService(&fakeRepository{}, &fakeStorage{}, &fakeCategoryChecker{exists: true})
 
-		_, err := service.Update(context.Background(), bson.NewObjectID(), UpdateProductRequest{}, nil)
+		_, err := service.Update(context.Background(), bson.NewObjectID(), UpdateProductRequest{}, bson.ObjectID{}, nil)
 		if !errors.Is(err, ErrInvalidProduct) {
 			t.Fatalf("Update() error = %v, want ErrInvalidProduct", err)
 		}
@@ -266,10 +369,10 @@ func TestUpdate(t *testing.T) {
 	t.Run("deletes the fresh upload when the update fails", func(t *testing.T) {
 		repository := &fakeRepository{err: ErrProductNotFound}
 		storage := &fakeStorage{}
-		service := NewProductService(repository, storage)
+		service := NewProductService(repository, storage, &fakeCategoryChecker{exists: true})
 
 		_, err := service.Update(context.Background(), bson.NewObjectID(),
-			UpdateProductRequest{Price: 10}, imageFile(t, "image/png"))
+			UpdateProductRequest{Price: 10}, bson.ObjectID{}, imageFile(t, "image/png"))
 		if !errors.Is(err, ErrProductNotFound) {
 			t.Fatalf("Update() error = %v, want ErrProductNotFound", err)
 		}
@@ -283,10 +386,10 @@ func TestUpdate(t *testing.T) {
 	t.Run("does not fail when deleting the previous image fails", func(t *testing.T) {
 		previous := &Product{ID: bson.NewObjectID(), ImageKey: "products/old"}
 		storage := &fakeStorage{deleteErr: errors.New("s3 down")}
-		service := NewProductService(&fakeRepository{previous: previous}, storage)
+		service := NewProductService(&fakeRepository{previous: previous}, storage, &fakeCategoryChecker{exists: true})
 
 		if _, err := service.Update(context.Background(), previous.ID,
-			UpdateProductRequest{Price: 10}, imageFile(t, "image/png")); err != nil {
+			UpdateProductRequest{Price: 10}, bson.ObjectID{}, imageFile(t, "image/png")); err != nil {
 			t.Fatalf("Update() error = %v, want nil", err)
 		}
 	})
@@ -295,7 +398,7 @@ func TestUpdate(t *testing.T) {
 func TestErrorsAreNotSwallowed(t *testing.T) {
 	boom := errors.New("mongo is down")
 
-	service := NewProductService(&fakeRepository{err: boom}, &fakeStorage{})
+	service := NewProductService(&fakeRepository{err: boom}, &fakeStorage{}, &fakeCategoryChecker{exists: true})
 
 	if _, err := service.FindByID(context.Background(), bson.NewObjectID()); !errors.Is(err, boom) {
 		t.Errorf("FindByID() error = %v, want %v", err, boom)

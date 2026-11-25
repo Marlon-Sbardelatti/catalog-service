@@ -60,13 +60,19 @@ func (h *ProductHandler) Create(c *gin.Context) {
 		return
 	}
 
+	categoryID, err := bson.ObjectIDFromHex(req.CategoryID)
+	if err != nil {
+		apierrors.Write(c, apierrors.BadRequest("invalid category id", nil), err)
+		return
+	}
+
 	file, err := c.FormFile("image")
 	if err != nil {
 		apierrors.Write(c, apierrors.BadRequest("image is required", nil), err)
 		return
 	}
 
-	product, err := h.service.Create(c.Request.Context(), req, file)
+	product, err := h.service.Create(c.Request.Context(), req, categoryID, file)
 	if err != nil {
 		apierrors.Write(c, toAPIError(err), err)
 		return
@@ -105,6 +111,16 @@ func (h *ProductHandler) Update(c *gin.Context) {
 		return
 	}
 
+	var categoryID bson.ObjectID
+
+	if req.CategoryID != "" {
+		categoryID, err = bson.ObjectIDFromHex(req.CategoryID)
+		if err != nil {
+			apierrors.Write(c, apierrors.BadRequest("invalid category id", nil), err)
+			return
+		}
+	}
+
 	file, err := c.FormFile("image")
 
 	if err != nil && !errors.Is(err, http.ErrMissingFile) {
@@ -112,7 +128,7 @@ func (h *ProductHandler) Update(c *gin.Context) {
 		return
 	}
 
-	product, err := h.service.Update(c.Request.Context(), id, req, file)
+	product, err := h.service.Update(c.Request.Context(), id, req, categoryID, file)
 	if err != nil {
 		apierrors.Write(c, toAPIError(err), err)
 		return
