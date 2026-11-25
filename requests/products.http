@@ -1,0 +1,54 @@
+@host = http://localhost:3001
+@api = {{host}}/api/v1
+
+### List products
+GET {{api}}/products
+
+### Get product by id
+GET {{api}}/products/6afb5bcd3713b5dac39cfee8
+
+### Create product (multipart: fields + image)
+POST {{api}}/products
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="name"
+
+Camisa Furia adidas 2026
+--WebAppBoundary
+Content-Disposition: form-data; name="description"
+
+Camisa (jersey) Furia E-Sports 2026 - Fallen, preta com detalhes brancos
+--WebAppBoundary
+Content-Disposition: form-data; name="price"
+
+299
+--WebAppBoundary
+Content-Disposition: form-data; name="image"; filename="furia-jersey.jpg"
+Content-Type: image/jpeg
+
+@ ../images/furia-jersey.jpg
+--WebAppBoundary--
+
+### Update product (multipart: campos e/ou imagem, todos opcionais)
+PUT {{api}}/products/6afb5bcd3713b5dac39cfee8
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="name"
+
+Camisa Vasco nike 2026 - Home
+--WebAppBoundary
+Content-Disposition: form-data; name="description"
+
+Camisa (jersey) Vasco 2026 - Lescano, preta com detalhes brancos
+--WebAppBoundary
+Content-Disposition: form-data; name="price"
+
+259
+--WebAppBoundary
+Content-Disposition: form-data; name="image"; filename="furia-jersey.jpg"
+Content-Type: image/jpeg
+
+@ ../images/furia-jersey.jpg
+--WebAppBoundary--

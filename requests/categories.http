@@ -1,0 +1,24 @@
+@host = http://localhost:3001
+@api = {{host}}/api/v1
+@categoryId = 6afb5bcd3713b5dac39cfee9
+
+### List categories
+GET {{api}}/categories
+
+### Get category by id
+GET {{api}}/categories/{{categoryId}}
+
+### Create category
+POST {{api}}/categories
+Content-Type: application/json
+
+{ "name": "Jerseys", "description": "Camisas de time e e-sports" }
+
+### Update category (fields are optional)
+PUT {{api}}/categories/{{categoryId}}
+Content-Type: application/json
+
+{ "name": "Jerseys 2026" }
+
+### Delete category
+DELETE {{api}}/categories/{{categoryId}}
